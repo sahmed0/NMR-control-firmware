@@ -1,0 +1,69 @@
+
+.program cpmg
+.side_set 1 opt
+
+; Parameters pushed to FIFO:
+; 1. Number of echoes (reused as loop counter)
+; 2. 90 degree pulse duration (cycles)
+; 3. Tau delay duration (cycles) - minus overhead
+; 4. 180 degree pulse duration (cycles)
+
+; Note: We assume the CPU has pre-calculated precise cycle counts
+; allowing for the instruction overheads using clock_get_hz().
+
+.wrap_target
+    ; 1. Setup Phase: 90 degree pulse
+
+    
+
+    pull block          ; Pull 90_len
+    mov y, osr          ; Y = 90_len
+    
+    nop side 1 [0]      ; Turn ON pulse (consume 1 cycle execution)
+loop_90:
+    jmp y-- loop_90     ; Delay for 90_len (1 cycle loop)
+    nop side 0          ; Turn OFF pulse
+    
+    ; 2. Tau Delay Phase (1st Tau)
+    pull block          ; Pull Tau_len
+    mov y, osr          ; Y = Tau_len
+loop_tau1:
+    jmp y-- loop_tau1   ; Wait Tau
+    
+    ; 3. Prepare for Echo Loop
+    pull block          ; Pull Loop Count (N echoes)
+    mov x, osr          ; X = Loop Counter
+    
+    pull block          ; Pull 180_len
+    mov isr, osr        ; ISR = 180_len (Saved)
+    
+    ; 4. Load Tau for the loop
+
+    
+    pull block          ; Pull Tau_len (for the loop)
+                        ; OSR now holds Tau_len
+                        
+echo_loop:
+    mov y, isr          ; Retrieve 180_len from ISR
+    
+    nop side 1          ; Pulse 180 ON
+loop_180:
+    jmp y-- loop_180    ; Hold 180 
+    nop side 0          ; Pulse 180 OFF
+    
+    ; First Tau Delay (180 to Echo center)
+    mov y, osr          ; Retrieve Tau from OSR
+loop_wait_1:
+    jmp y-- loop_wait_1
+    
+    ; TRIGGER DMA / IRQ for Echo
+    irq 0               ; Trigger IRQ 0 (CPU/DMA can sync to this)
+    
+    ; Second Tau Delay (Echo center to next 180)
+    mov y, osr          ; Retrieve Tau from OSR again
+loop_wait_2:
+    jmp y-- loop_wait_2
+    
+    jmp x-- echo_loop   ; Loop N times
+    
+.wrap
