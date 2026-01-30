@@ -15,9 +15,9 @@ This project uses the Pico's advanced **PIO (Programmable I/O)** and **DMA (Dire
 
 ## User Interface
 
-![free induction decay](FID.png)
-![CPMG pulse sequence](CPMG.png)
-![transverse relaxation time](T2.png)
+![free induction decay](images/FID.png)
+![CPMG pulse sequence](images/CPMG.png)
+![transverse relaxation time](images/T2.png)
 
 
 ## 🛠️ Hardware Setup
