@@ -12,14 +12,14 @@ from tkinter import filedialog, messagebox # Tkinter for file dialogs and messag
 from scipy.optimize import curve_fit # Scipy for curve fitting
 
 # Configuration
-ctk.set_appearance_mode("Dark") # GUI appearance
+ctk.set_appearance_mode("System") # GUI appearance
 ctk.set_default_color_theme("blue") # GUI color theme
 
 class EFNMRApp(ctk.CTk):
     def __init__(self):
         super().__init__() # Initialize the parent class
 
-        self.title("Earth's Field NMR Spectrometer Controller") # Window title
+        self.title("C++ NMR Spectrometer Controller") # Window title
         self.geometry("1200x800") # Window size
         
         self.serial_port = None # Serial port
@@ -89,9 +89,9 @@ class EFNMRApp(ctk.CTk):
         self.fig_raw, self.ax_raw = plt.subplots(figsize=(5, 4), dpi=100) # Raw plot
         self.canvas_raw = FigureCanvasTkAgg(self.fig_raw, master=self.tab_raw) # Raw plot canvas
         self.canvas_raw.get_tk_widget().pack(fill="both", expand=True) # Raw plot canvas packing
-        self.ax_raw.set_title("ADC Voltage vs Time") # Raw plot title
+        self.ax_raw.set_title("ADC Values vs Time") # Raw plot title
         self.ax_raw.set_xlabel("Time (us)") # Raw plot x label
-        self.ax_raw.set_ylabel("ADC Voltage (mV)") # Raw plot y label
+        self.ax_raw.set_ylabel("ADC Values") # Raw plot y label (1 ADC unit = 0.8 mV for Pico)
         self.ax_raw.grid(True)
 
         # T2 Plot
@@ -100,11 +100,11 @@ class EFNMRApp(ctk.CTk):
         self.canvas_t2.get_tk_widget().pack(fill="both", expand=True) # T2 plot canvas packing
         self.ax_t2.set_title("T2 Relaxation Analysis") # T2 plot title
         self.ax_t2.set_xlabel("Time (ms)") # T2 plot x label
-        self.ax_t2.set_ylabel("Echo Amplitude (mV)") # T2 plot y label
+        self.ax_t2.set_ylabel("Peak Amplitude") # T2 plot y label
         self.ax_t2.grid(True)
         
         self.data_time = [] # Data time
-        self.data_voltage = [] # Data voltage
+        self.data_values = [] # Data ADC values
         self.t2_time = [] # T2 time
         self.t2_amp = [] # T2 amplitude
 
@@ -186,7 +186,7 @@ class EFNMRApp(ctk.CTk):
     def mock_receive(self, cmd_type, sleep, dsize, tau, echoes):
         # Generate fake decaying sine/echo train
         self.data_time = [] # Data time
-        self.data_voltage = [] # Data voltage
+        self.data_values = [] # Data ADC values
         
         t = np.linspace(0, dsize * sleep, dsize) # Time
         
@@ -212,14 +212,14 @@ class EFNMRApp(ctk.CTk):
             y += np.random.normal(0, 10, dsize) # Add Mock Noise
 
         self.data_time = t.tolist() # Add mock time data to list
-        self.data_voltage = y.tolist() # Add mock voltage data to list
+        self.data_values = y.tolist() # Add mock ADC values data to list
         
         self.after(0, self.update_plots, cmd_type) # Update plots
 
 # READING REAL DATA IF CONNECTED TO RASPBERRY PI PICO
     def serial_receive(self): 
         self.data_time = [] # Data time
-        self.data_voltage = [] # Data voltage
+        self.data_values = [] # Data ADC values
         
         # Read lines until timeout or done?
         # Firmware sends line by line: "time,val"
@@ -237,7 +237,7 @@ class EFNMRApp(ctk.CTk):
                     try:
                         t, v = map(float, line.split(",")) # Split line
                         self.data_time.append(t) # Add time
-                        self.data_voltage.append(v) # Add voltage
+                        self.data_values.append(v) # Add ADC value
                     except:
                         pass # Skip invalid lines
                 start_time = time.time() # Reset timeout on data
@@ -249,15 +249,15 @@ class EFNMRApp(ctk.CTk):
         
         # Raw Plot
         self.ax_raw.clear() # Clear raw plot
-        self.ax_raw.plot(self.data_time, self.data_voltage, color='#4a90e2') # Plot raw data
-        self.ax_raw.set_title("ADC Voltage vs Time") # Set title
+        self.ax_raw.plot(self.data_time, self.data_values, color='#4a90e2') # Plot raw data
+        self.ax_raw.set_title("ADC Values vs Time") # Set title
         self.ax_raw.set_xlabel("Time (us)") # Set x label
-        self.ax_raw.set_ylabel("ADC Voltage (mV)") # Set y label
+        self.ax_raw.set_ylabel("ADC Values") # Set y label
         self.ax_raw.grid(True, alpha=0.3) # Add grid
         self.canvas_raw.draw() # Draw canvas
         
         # T2 Analysis if CPMG mode
-        if mode == "CPMG" and len(self.data_voltage) > 0: # If CPMG mode and data available
+        if mode == "CPMG" and len(self.data_values) > 0: # If CPMG mode and data available
             self.analyze_t2()
             
     def analyze_t2(self): # Analyze T2
@@ -268,10 +268,10 @@ class EFNMRApp(ctk.CTk):
             echoes = int(self.entry_num.get()) # Get echoes
             
             peaks_t = [] # Peaks time
-            peaks_v = [] # Peaks voltage
+            peaks_v = [] # Peaks ADC values
             
             arr_t = np.array(self.data_time) # Data time
-            arr_v = np.array(self.data_voltage) # Data voltage
+            arr_v = np.array(self.data_values) # Data ADC values
             baseline = 2048 # ADC mid-point approximately
             
             # Refine baseline
@@ -282,15 +282,15 @@ class EFNMRApp(ctk.CTk):
                 # Search window +/- tau/2
                 mask = (arr_t > center_time - tau/2) & (arr_t < center_time + tau/2)
                 if np.any(mask): # If mask is not empty
-                    window_v = arr_v[mask] # Window voltage
+                    window_v = arr_v[mask] # Window ADC values
                     window_t = arr_t[mask] # Window time
                     
                     peak_idx = np.argmax(window_v) # Peak index
-                    peak_val = window_v[peak_idx] - baseline # Peak voltage
+                    peak_val = window_v[peak_idx] - baseline # Peak ADC value
                     peak_time = window_t[peak_idx] # Peak time
                     
                     peaks_t.append(peak_time / 1000.0) # Convert to ms
-                    peaks_v.append(peak_val) # Append peak voltage
+                    peaks_v.append(peak_val) # Append peak ADC value
             
             self.ax_t2.clear() # Clear T2 plot
             self.ax_t2.scatter(peaks_t, peaks_v, color='red', label='Echo Peaks') # Scatter peaks
@@ -305,7 +305,7 @@ class EFNMRApp(ctk.CTk):
                     t2_val = popt[1] # T2 value
                     
                     fit_t = np.linspace(min(peaks_t), max(peaks_t), 100) # Fit time
-                    fit_v = decay(fit_t, *popt) # Fit voltage
+                    fit_v = decay(fit_t, *popt) # Fit ADC values
                     
                     self.ax_t2.plot(fit_t, fit_v, 'g--', label=f'Fit: T2={t2_val:.2f} ms') # Plot fit
                     self.t2_time = peaks_t # T2 time
@@ -317,7 +317,7 @@ class EFNMRApp(ctk.CTk):
             self.ax_t2.grid(True, alpha=0.3) # Add grid
             self.ax_t2.set_title("T2 Relaxation Analysis") # Set title
             self.ax_t2.set_xlabel("Time (ms)") # Set x label
-            self.ax_t2.set_ylabel("Amplitude (mV)") # Set y label
+            self.ax_t2.set_ylabel("Peak Amplitude") # Set y label
             self.canvas_t2.draw() # Draw canvas
             
         except Exception as e: # If error
@@ -328,8 +328,8 @@ class EFNMRApp(ctk.CTk):
         if filename: # If filename is not empty
             with open(filename, 'w', newline='') as f: # Open file
                 writer = csv.writer(f) # CSV writer
-                writer.writerow(["Time_us", "Voltage"]) # Write header
-                for t, v in zip(self.data_time, self.data_voltage): # For each data point
+                writer.writerow(["Time_us", "ADC_Values"]) # Write header
+                for t, v in zip(self.data_time, self.data_values): # For each data point
                     writer.writerow([t, v]) # Write data point
             
             # Save T2 data if exists
