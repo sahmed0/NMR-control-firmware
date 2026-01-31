@@ -10,14 +10,16 @@ import matplotlib.pyplot as plt # Matplotlib for plotting
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg # Matplotlib for tkinter
 from tkinter import filedialog, messagebox # Tkinter for file dialogs and message boxes
 from scipy.optimize import curve_fit # Scipy for curve fitting
+from scipy.signal import find_peaks # Peak finding
+from datetime import datetime # Date for copyright
 
 # Configuration
-ctk.set_appearance_mode("System") # GUI appearance
+ctk.set_appearance_mode("Dark") # GUI appearance
 ctk.set_default_color_theme("blue") # GUI color theme
 
 class EFNMRApp(ctk.CTk):
     def __init__(self):
-        super().__init__() # Initialize the parent class
+        super().__init__() # Initialise the parent class
 
         self.title("C++ NMR Spectrometer Controller") # Window title
         self.geometry("1200x800") # Window size
@@ -63,10 +65,10 @@ class EFNMRApp(ctk.CTk):
         
         ctk.CTkLabel(self.param_frame, text="Parameters", font=("Roboto", 16, "bold")).pack(pady=5) # Parameters label
         
-        self.create_param_entry("Sleep Time (us):", "20") # Sleep time entry
-        self.create_param_entry("Data Size:", "10000") # Data size entry
-        self.create_param_entry("Tau (us):", "5000") # Tau entry
-        self.create_param_entry("Num Echoes:", "20") # Num echoes entry
+        self.create_param_entry("Sleep Time (us):", "20", "Time between samples. Determines sampling rate.") # Sleep time entry
+        self.create_param_entry("Data Size:", "3000", "Total data points. Affects frequency resolution.") # Data size entry
+        self.create_param_entry("Tau (us):", "226", "Pulse spacing / echo time for CPMG.") # Tau entry
+        self.create_param_entry("Num Echoes:", "133", "Number of echoes to acquire in CPMG.") # Num echoes entry
 
         # Command Buttons
         self.btn_fid = ctk.CTkButton(self.sidebar, text="Run FID", command=self.run_fid) # Run FID button
@@ -77,6 +79,11 @@ class EFNMRApp(ctk.CTk):
         
         self.btn_export = ctk.CTkButton(self.sidebar, text="Export Data", command=self.export_data, state="disabled") # Export data button
         self.btn_export.pack(pady=20, padx=10, fill="x")
+        
+        # Copyright
+        year = datetime.now().year
+        ctk.CTkLabel(self.sidebar, text=f"© {year} Sajid Ahmed\nAll rights reserved", 
+                     font=("Roboto", 14), text_color="gray").pack(side="bottom", pady=10)
 
         # Plots Area (Tabs)
         self.tab_view = ctk.CTkTabview(self) # Tab view
@@ -84,6 +91,7 @@ class EFNMRApp(ctk.CTk):
         
         self.tab_raw = self.tab_view.add("Raw Signal") # Raw signal tab
         self.tab_t2 = self.tab_view.add("T2 Analysis") # T2 analysis tab
+        self.tab_fft = self.tab_view.add("FFT Analysis") # FFT analysis tab
         
         # Raw Plot
         self.fig_raw, self.ax_raw = plt.subplots(figsize=(5, 4), dpi=100) # Raw plot
@@ -101,23 +109,45 @@ class EFNMRApp(ctk.CTk):
         self.ax_t2.set_title("T2 Relaxation Analysis") # T2 plot title
         self.ax_t2.set_xlabel("Time (ms)") # T2 plot x label
         self.ax_t2.set_ylabel("Peak Amplitude") # T2 plot y label
+        self.ax_t2.set_ylabel("Peak Amplitude") # T2 plot y label
         self.ax_t2.grid(True)
+
+        # FFT Plot
+        self.fig_fft, self.ax_fft = plt.subplots(figsize=(5, 4), dpi=100) # FFT plot
+        self.canvas_fft = FigureCanvasTkAgg(self.fig_fft, master=self.tab_fft) # FFT plot canvas
+        self.canvas_fft.get_tk_widget().pack(fill="both", expand=True) # FFT plot canvas packing
+        self.ax_fft.set_title("FFT Spectrum") # FFT plot title
+        self.ax_fft.set_xlabel("Frequency (Hz)") # FFT plot x label
+        self.ax_fft.set_ylabel("Magnitude") # FFT plot y label
+        self.ax_fft.grid(True)
         
         self.data_time = [] # Data time
         self.data_values = [] # Data ADC values
         self.t2_time = [] # T2 time
         self.t2_amp = [] # T2 amplitude
 
-    def create_param_entry(self, label, default): # Create parameter entry
+    def create_param_entry(self, label, default, tooltip_text=None): # Create parameter entry
         f = ctk.CTkFrame(self.param_frame, fg_color="transparent") 
         f.pack(fill="x", pady=2)
-        ctk.CTkLabel(f, text=label, width=100, anchor="w").pack(side="left")
+        lbl = ctk.CTkLabel(f, text=label, width=100, anchor="w")
+        lbl.pack(side="left")
         e = ctk.CTkEntry(f, width=80)
         e.pack(side="right")
         e.insert(0, default)
         
+        if tooltip_text:
+            # Add 'i' button
+            btn_help = ctk.CTkButton(f, text="i", width=20, height=20, 
+                                     fg_color="gray", hover_color="#555555",
+                                     command=lambda t=tooltip_text: self.show_help(t))
+            btn_help.pack(side="right", padx=(0, 5))
+        
         # Store reference by label
         setattr(self, f"entry_{label.split()[0].lower()}", e)
+        
+    def show_help(self, text):
+        # Native MessageBox
+        messagebox.showinfo("Parameter Info", text)
 
     def get_ports(self): # Get ports
         return [p.device for p in serial.tools.list_ports.comports()]
@@ -192,7 +222,9 @@ class EFNMRApp(ctk.CTk):
         
         if cmd_type == "FID": # If Mock FID
             # Decaying exponential sine
-            y = 2000 * np.exp(-t/10000) * np.sin(2 * np.pi * 0.002 * t) + 2048 # Mock FID Curve Data
+            # Target frequency 2210 Hz. t is in microseconds.
+            # 2210 Hz = 2210 cycles / 1000000 us = 0.00221 cycles/us
+            y = 2000 * np.exp(-t/10000) * np.sin(2 * np.pi * 0.00221 * t) + 2048 # Mock FID Curve Data
         else: # If Mock CPMG
             # CPMG: Series of echoes
             y = np.ones_like(t) * 2048 # Baseline
@@ -259,6 +291,74 @@ class EFNMRApp(ctk.CTk):
         # T2 Analysis if CPMG mode
         if mode == "CPMG" and len(self.data_values) > 0: # If CPMG mode and data available
             self.analyze_t2()
+            self.analyze_fft() # Also do FFT for CPMG
+        elif mode == "FID" and len(self.data_values) > 0:
+            self.analyze_fft()
+
+    def analyze_fft(self):
+        try:
+            # Check inputs
+            sleep_us = int(self.entry_sleep.get())
+            
+            # Preprocessing
+            signal = np.array(self.data_values)
+            
+            # 1. Remove DC Offset
+            signal = signal - np.mean(signal)
+            
+            # 2. Windowing (Hanning)
+            window = np.hanning(len(signal))
+            signal_windowed = signal * window
+            
+            # 3. Zero-padding
+            # Pad to next power of 2, times 4 for better resolution
+            n = len(signal)
+            n_padded = 2**int(np.ceil(np.log2(n))) * 4
+            
+            # FFT
+            fft_vals = np.fft.fft(signal_windowed, n=n_padded)
+            # Sample spacing in seconds
+            dt = sleep_us * 1e-6 
+            freqs = np.fft.fftfreq(n_padded, d=dt)
+            
+            # Magnitude
+            magnitude = np.abs(fft_vals)
+            
+            # Keep only positive frequencies
+            mask = freqs >= 0
+            freqs = freqs[mask]
+            magnitude = magnitude[mask]
+            
+            # Plot
+            self.ax_fft.clear()
+            self.ax_fft.plot(freqs, magnitude, color='#e91e63')
+            self.ax_fft.set_title("FFT Spectrum")
+            self.ax_fft.set_xlabel("Frequency (Hz)")
+            self.ax_fft.set_ylabel("Magnitude")
+            self.ax_fft.grid(True, alpha=0.3)
+            
+            # Find peak frequency
+            peaks, _ = find_peaks(magnitude, height=np.max(magnitude)*0.1) # Find peaks > 10% max
+            
+            # Sort by height to get top peaks
+            if len(peaks) > 0:
+                sorted_indices = np.argsort(magnitude[peaks])[::-1]
+                top_peaks = peaks[sorted_indices[:3]] # Top 3 peaks
+                
+                for p in top_peaks:
+                    f_val = freqs[p]
+                    m_val = magnitude[p]
+                    self.ax_fft.annotate(f"{f_val:.1f} Hz", xy=(f_val, m_val), 
+                                         xytext=(0, 10), textcoords="offset points",
+                                         ha='center', fontsize=8, color='#e91e63')
+            
+            self.fft_freqs = freqs
+            self.fft_magnitude = magnitude
+            
+            self.canvas_fft.draw()
+            
+        except Exception as e:
+            print(f"FFT Error: {e}")
             
     def analyze_t2(self): # Analyze T2
         # Extract peaks from echo train
@@ -339,6 +439,14 @@ class EFNMRApp(ctk.CTk):
                     writer.writerow(["Time_ms", "Peak_Amplitude"]) # Write header
                     for t, v in zip(self.t2_time, self.t2_amp): # For each data point
                         writer.writerow([t, v]) # Write data point
+
+            # Save FFT data if exists
+            if hasattr(self, 'fft_freqs') and len(self.fft_freqs) > 0:
+                with open(filename.replace(".csv", "_FFT.csv"), 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Frequency_Hz", "Magnitude"])
+                    for fr, m in zip(self.fft_freqs, self.fft_magnitude):
+                        writer.writerow([fr, m])
 
 if __name__ == "__main__": # If main
     app = EFNMRApp() # Create app
